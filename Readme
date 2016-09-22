@@ -1,0 +1,42 @@
+Struktura lib trzyma:
+- wskaźnik na zamapowany obszar pamięci
+- wskaźnik na funkcję getsym (będzie potem potrzebna do leniwego wiązania
+- wskaźnik na tablicę stringów, znajdującą się pod zmienną DT_STRTAB w segmencie PT_DYNAMIC
+- wskaźnik na tablicę symboli (DT_SYMTAB jak powyżej)
+- rozmiar tablicy symboli
+- wskaźnik na relokacje typu plt
+
+Funkcja library_load wykonuje następujące operacje:
+-otwiera plik podany jako parametr wywołania, sprawdza czy jest poprawnym plikiem elf
+-wczytuje cały plik do bufora, które początek rzutowany jest na nagłówek elfa (Elf32_Ehdr)
+-z bufora odczytuje odpowiednie iformacje, pozwalające na przejrzenie wszystkich segmentów
+(e_phnum, e_phoffset etc)
+-oblicza jest rozmiar potrzebny do załadowania segmentów typu PT_LOAD 
+(ostatni bajt ostatniego segmentu PT_LOAD)
+-iterując po segmentach, segmenty typu LOAD ładuje do pamięci mniejszymi mmapami z flagą MAP_FIXED 
+oraz uprawnieniami PROT_READ | PROT_WRTIE, aby móc przeprowadzić relokacje
+-parsuje segment typu PT_DYNAMIC w celu zdobycia wskaźnika na tablicę stringów, sumboli, relokacji 
+(w tablicy .rel.dyn i w .rel.plt) oraz wpisania pod odpowiednie adresy tablicy GOT 
+uchwytu na library oraz funkcji wiążącej symbole funkcji
+-przeprowadza relokacje z tablicy rel.dyn.
+-po przeprowadzeniu relokacji nadaje segmentom odpowiednie uprawnienia i zwraca wskaźnik na obiekt typu library.
+
+Funkcja library_getsym iteruje po tablicy symboli aż nie znajdzie symbolu o nazwie podanej w parametrze. Zwraca 
+wskaźnik na ten symbol.
+
+Leniwe wiązanie:
+-pod odpowiednie sloty w tablicy GOT zostają wpisane: uchwyt do obiektu typu struct library oraz 
+funkcja resolveLazy
+-w momencie wywołania funkcja w programie zostaje wykonany skok do funkcji resolveLazy
+-resolveLazy zawiera tylko wstawki assemblerowe, których zadaniem jest zapamiętanie na stosie 
+rejestrów: %eax, %ecx, %edx oraz wywołanie funkcji resolveFunc i ustawienie dla niej parametrów
+pod odpowiednimi miejscami na stosie
+-funkcja resolveFunc która wiąże symbol funkcji z odpowiednim adresem i zwraca ten adres
+-po powrocie do funkcji resolveLazy wrzucam adres zwrócony przez resolveFunc na odpowiednie 
+miejsce na stosie, zdejmuję ze stosu niepotrzebne parametry (uchwyt do library i offset relokacji)
+przywracam właściwe wartości rejestrom: %eax, %ecx, %edx i wykonuję instrukcję return,
+czyli skaczę pod adres właściwej funkcji, która miała zostać wywołana
+
+Szukając informacji dotyczących mmapa znalazłam następujące źródło:
+https://chromium.googlesource.com/native_client/src/native_client/+/master/src/nonsfi/loader/elf_loader.c.
+Przeprowadzając mapowanie segmentów na nim się wzorowałam.
